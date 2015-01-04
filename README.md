@@ -3,7 +3,7 @@ pyelf
 
 Higher level interface to libelf (build on top of pylibelf). Currently its read only. Brief example of using it:
 
-
+```
 from pyelf import *
 
 # This is how you open an elf file:
@@ -39,3 +39,4 @@ ar = Ar("/usr/lib/libelf.a", 64)
 
 for elf in ar.elfs():
   print elf.arhdr.ar_name, elf.arhdr.ar_size
+```
