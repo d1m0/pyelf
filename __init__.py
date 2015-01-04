@@ -3,6 +3,7 @@ from pylibelf.types import *
 from pylibelf.iterators import *
 from pylibelf.constants import *
 from pylibelf.util import *
+from pylibelf.util.syms import *
 from pylibelf.macros import *
 import pylibelf.util
 import pylibelf
@@ -65,7 +66,8 @@ class ElfShdr(BaseElfNode):
 class ElfSym(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj,
-      Elf64_Sym if is64(elf) else Elf32_Sym, ['name', 'section'])
+      Elf64_Sym if is64(elf) else Elf32_Sym, ['name', 'section', 'defined', \
+        'contents'])
 
 
   def __getattr__(self, name):
@@ -73,6 +75,17 @@ class ElfSym(BaseElfNode):
       return elf_strptr(self._elf, self._pt.shdr.sh_link, self._obj.contents.st_name)
     elif (name == "section"):
       return self._pt
+    elif (name == "defined"):
+      return self.st_shndx != SHN_UNDEF
+    elif (name == "contents"):
+      (c, lelfRels, lelfRelas) = derefSymbolFull(self._elf, self._obj.contents)
+      rels = [ ElfRel(self._elf,
+        ElfScn(self._elf, self._pt._pt, elf_getscn(self._elf, scnInd)), r)
+          for (r, scnInd) in lelfRels ]
+      relas = [ ElfRela(self._elf,
+        ElfScn(self._elf, self._pt._pt, elf_getscn(self._elf, scnInd)), r)
+          for (r, scnInd) in lelfRels ]
+      return (c, rels, relas)
     else:
       return BaseElfNode.__getattr__(self, name)
 
@@ -80,6 +93,21 @@ class ElfRela(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj, \
       Elf64_Rela if is64(elf) else Elf32_Rela, ['sym'])
+
+  def __getattr__(self, name):
+    if (name == "sym"):
+      elfO = self._getelf()
+      scn = elfO.section(self._pt.shdr.sh_link)
+      symInd = ELF64_R_SYM(self.r_info) if is64(self._elf) else \
+        ELF32_R_SYM(self.r_info)
+      return ElfSym(self._elf, scn, scn.sym(symInd)._obj)
+    else:
+      return BaseElfNode.__getattr__(self, name)
+
+class ElfRel(BaseElfNode):
+  def __init__(self, elf, pt, obj):
+    BaseElfNode.__init__(self, elf, pt, obj, \
+      Elf64_Rel if is64(elf) else Elf32_Rel, ['sym'])
 
   def __getattr__(self, name):
     if (name == "sym"):
@@ -122,7 +150,7 @@ class ElfScn(BaseElfNode):
     elif (name == "relas" and self.shdr.sh_type == SHT_RELA):
       relaT = Elf32_Rela if (is32(self._elf)) else Elf64_Rela
       return reduce(lambda a,c: a+c, \
-        map(lambda d: map(lambda rela:  ElfRela(self._elf, self, pointer(rela)), \
+        map(lambda d: map(lambda rela:  ElfRela(self._elf, self, pointer(rela)),\
           list(arr_iter(d, relaT))), list(data(self._obj))))
     else:
       return BaseElfNode.__getattr__(self, name)
@@ -157,7 +185,7 @@ class Elf(BaseElfNode):
       self._class = pylibelf.util._class(elf)
 
     BaseElfNode.__init__(self, elf, pt, elf, pylibelf.types.Elf, \
-      ['ehdr', 'shstrndx', 'arhdr', 'sections', 'section', 'syms'])
+      ['ehdr', 'shstrndx', 'arhdr', 'sections', 'section', 'syms', 'findSym'])
 
   def __del__(self):
     elf_end(self._elf)
@@ -173,7 +201,6 @@ class Elf(BaseElfNode):
       return ElfArhdr(self._elf, self, elf_getarhdr(self._elf))
     else:
       return BaseElfNode.__getattr__(self, name)
-    
 
   def sections(self, **kwargs):
     for s in sections(self._elf, **kwargs):
@@ -189,6 +216,12 @@ class Elf(BaseElfNode):
 
       for sym in syms(self._elf, scn._obj):
         yield ElfSym(self._elf, scn, pointer(sym[1]))
+
+  def findSym(self, name):
+    for s in self.syms():
+      if s.name == name:
+        return s
+    return None
 
 class Ar:
   def __init__(self, fname, claz):
@@ -206,5 +239,5 @@ class Ar:
     elf_end(ar)
     os.close(self.fd)
 
-__all__ = [ 'BaseElfNode', 'ElfEhdr', 'ElfShdr', 'ElfSym', 'ElfRela', 'ElfData',
-  'ElfArhdr', 'ElfScn', 'Elf', 'Ar' ]
+__all__ = [ 'BaseElfNode', 'ElfEhdr', 'ElfShdr', 'ElfSym', 'ElfRela', \
+  'ElfData', 'ElfArhdr', 'ElfScn', 'Elf', 'Ar' ]
