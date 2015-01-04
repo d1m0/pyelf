@@ -49,12 +49,12 @@ class BaseElfNode(object):
 class ElfEhdr(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj,
-      Elf64_Ehdr if is64(self._elf) else Elf32_Ehdr, [])
+      Elf64_Ehdr if is64(elf) else Elf32_Ehdr, [])
 
 class ElfShdr(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj,
-      Elf64_Shdr if is64(self._elf) else Elf32_Shdr, ['name'])
+      Elf64_Shdr if is64(elf) else Elf32_Shdr, ['name'])
 
   def __getattr__(self, name):
     if (name == "name"):
@@ -65,7 +65,7 @@ class ElfShdr(BaseElfNode):
 class ElfSym(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj,
-      Elf64_Sym if is64(self._elf) else Elf32_Sym, ['name', 'section'])
+      Elf64_Sym if is64(elf) else Elf32_Sym, ['name', 'section'])
 
 
   def __getattr__(self, name):
@@ -79,7 +79,7 @@ class ElfSym(BaseElfNode):
 class ElfRela(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj, \
-      Elf64_Rela if is64(self._elf) else Elf32_Rela, ['sym'])
+      Elf64_Rela if is64(elf) else Elf32_Rela, ['sym'])
 
   def __getattr__(self, name):
     if (name == "sym"):
@@ -101,7 +101,7 @@ class ElfArhdr(BaseElfNode):
 
 class ElfScn(BaseElfNode):
   def __init__(self, elf, pt, obj):
-    BaseElfNode.__init__(self, elf, pt, obj, Elf32_Scn,\
+    BaseElfNode.__init__(self, elf, pt, obj, Elf_Scn,\
       ['index', 'shdr', 'link_scn', 'info_scn', 'syms', 'relas', 'sym', 'data'])
   def __getattr__(self, name):
     if (name == "index"):
@@ -205,3 +205,6 @@ class Ar:
 
     elf_end(ar)
     os.close(self.fd)
+
+__all__ = [ 'BaseElfNode', 'ElfEhdr', 'ElfShdr', 'ElfSym', 'ElfRela', 'ElfData',
+  'ElfArhdr', 'ElfScn', 'Elf', 'Ar' ]
