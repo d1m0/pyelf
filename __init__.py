@@ -7,25 +7,43 @@ from pylibelf.util.syms import *
 from pylibelf.macros import *
 import pylibelf.util
 import pylibelf
+import types
 import os
 
 class BaseElfNode(object):
+  _globCache = {}
+
   def __init__(self, elf, pt, obj, typ = None, addFields = []):
     assert(pt == None or isinstance(pt, BaseElfNode))
     self._elf = elf
     self._pt = pt
     self._obj = obj
+    self._ptr = cast(self._obj, c_void_p).value
     self._typ = typ
+    self._cache = {}
 
     self._fields = []
     if self._typ != None:
       self._fields += map(lambda x: x[0], self._typ._fields_)
     self._fields += addFields
-    
 
   def _select(self, name):  return select(self._elf, name)
 
   def __getattr__(self, name):
+    key = (self._ptr, name)
+
+    if (key in self._globCache):
+      return self._globCache[key]
+
+    res = self._getattr_impl(name)
+
+    if (isinstance(res, types.GeneratorType)):
+      self._globCache[key] = list(res)
+    else:
+      self._globCache[key] = res
+    return res
+
+  def _getattr_impl(self, name):
     try:
       inner = self._obj.contents
     except AttributeError:
@@ -57,11 +75,11 @@ class ElfShdr(BaseElfNode):
     BaseElfNode.__init__(self, elf, pt, obj,
       Elf64_Shdr if is64(elf) else Elf32_Shdr, ['name'])
 
-  def __getattr__(self, name):
+  def _getattr_impl(self, name):
     if (name == "name"):
       return elf_strptr(self._elf, self._pt._pt.ehdr.e_shstrndx, self._obj.contents.sh_name)
     else:
-      return BaseElfNode.__getattr__(self, name)
+      return BaseElfNode._getattr_impl(self, name)
 
 class ElfSym(BaseElfNode):
   def __init__(self, elf, pt, obj):
@@ -69,8 +87,7 @@ class ElfSym(BaseElfNode):
       Elf64_Sym if is64(elf) else Elf32_Sym, ['name', 'section', 'defined', \
         'contents'])
 
-
-  def __getattr__(self, name):
+  def _getattr_impl(self, name):
     if (name == "name"):
       return elf_strptr(self._elf, self._pt.shdr.sh_link, self._obj.contents.st_name)
     elif (name == "section"):
@@ -79,22 +96,22 @@ class ElfSym(BaseElfNode):
       return self.st_shndx != SHN_UNDEF
     elif (name == "contents"):
       (c, lelfRels, lelfRelas) = derefSymbolFull(self._elf, self._obj.contents)
-      rels = [ ElfRel(self._elf,
-        ElfScn(self._elf, self._pt._pt, elf_getscn(self._elf, scnInd)), r)
+      targetSec = self._pt._pt.section(self.st_shndx)
+      relaSec = targetSec.relaScn
+      rels = [ ElfRel(self._elf, relaSec, pointer(r))
           for (r, scnInd) in lelfRels ]
-      relas = [ ElfRela(self._elf,
-        ElfScn(self._elf, self._pt._pt, elf_getscn(self._elf, scnInd)), r)
-          for (r, scnInd) in lelfRels ]
+      relas = [ ElfRela(self._elf, relaSec, pointer(r))
+          for (r, scnInd) in lelfRelas ]
       return (c, rels, relas)
     else:
-      return BaseElfNode.__getattr__(self, name)
+      return BaseElfNode._getattr_impl(self, name)
 
 class ElfRela(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj, \
       Elf64_Rela if is64(elf) else Elf32_Rela, ['sym'])
 
-  def __getattr__(self, name):
+  def _getattr_impl(self, name):
     if (name == "sym"):
       elfO = self._getelf()
       scn = elfO.section(self._pt.shdr.sh_link)
@@ -102,14 +119,14 @@ class ElfRela(BaseElfNode):
         ELF32_R_SYM(self.r_info)
       return ElfSym(self._elf, scn, scn.sym(symInd)._obj)
     else:
-      return BaseElfNode.__getattr__(self, name)
+      return BaseElfNode._getattr_impl(self, name)
 
 class ElfRel(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj, \
       Elf64_Rel if is64(elf) else Elf32_Rel, ['sym'])
 
-  def __getattr__(self, name):
+  def _getattr_impl(self, name):
     if (name == "sym"):
       elfO = self._getelf()
       scn = elfO.section(self._pt.shdr.sh_link)
@@ -117,7 +134,7 @@ class ElfRel(BaseElfNode):
         ELF32_R_SYM(self.r_info)
       return ElfSym(self._elf, scn, scn.sym(symInd)._obj)
     else:
-      return BaseElfNode.__getattr__(self, name)
+      return BaseElfNode._getattr_impl(self, name)
 
 class ElfData(BaseElfNode):
   def __init__(self, elf, pt, obj):
@@ -131,7 +148,8 @@ class ElfScn(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj, Elf_Scn,\
       ['index', 'shdr', 'link_scn', 'info_scn', 'syms', 'relas', 'sym', 'data'])
-  def __getattr__(self, name):
+
+  def _getattr_impl(self, name):
     if (name == "index"):
       return elf_ndxscn(self._obj)
     elif (name == "shdr"):
@@ -152,8 +170,14 @@ class ElfScn(BaseElfNode):
       return reduce(lambda a,c: a+c, \
         map(lambda d: map(lambda rela:  ElfRela(self._elf, self, pointer(rela)),\
           list(arr_iter(d, relaT))), list(data(self._obj))))
+    elif (name == "relaScn"):
+      for s in self._pt.sections():
+        if s.shdr.sh_info == self.index:
+          return s
+
+      return None
     else:
-      return BaseElfNode.__getattr__(self, name)
+      return BaseElfNode._getattr_impl(self, name)
 
   def sym(self, ind):
     shtype = self.shdr.sh_type 
@@ -187,12 +211,17 @@ class Elf(BaseElfNode):
     BaseElfNode.__init__(self, elf, pt, elf, pylibelf.types.Elf, \
       ['ehdr', 'shstrndx', 'arhdr', 'sections', 'section', 'syms', 'findSym'])
 
-  def __del__(self):
-    elf_end(self._elf)
-    if self.fd != None:
-      os.close(self.fd)
+    self._symsMap = dict([
+      (sym.name, sym) for sym in self.syms()
+    ])
+  
+#  def __del__(self):
+#    fd = self.fd
+#    elf_end(self._elf)
+#    if fd != None:
+#      os.close(fd)
 
-  def __getattr__(self, name):
+  def _getattr_impl(self, name):
     if (name == "ehdr"):
       return ElfEhdr(self._elf, self, self._select("getehdr")(self._elf))
     elif (name == "shstrndx"):
@@ -200,11 +229,11 @@ class Elf(BaseElfNode):
     elif (name == "arhdr"):
       return ElfArhdr(self._elf, self, elf_getarhdr(self._elf))
     else:
-      return BaseElfNode.__getattr__(self, name)
+      return BaseElfNode._getattr_impl(self, name)
 
   def sections(self, **kwargs):
     for s in sections(self._elf, **kwargs):
-      yield ElfScn(self._elf, self, s)
+      yield ElfScn(self._elf, self, pointer(s))
 
   def section(self, ind):
     return ElfScn(self._elf, self, elf_getscn(self._elf, ind))
@@ -214,14 +243,14 @@ class Elf(BaseElfNode):
       if scn.shdr.sh_type != SHT_SYMTAB:
         continue
 
-      for sym in syms(self._elf, scn._obj):
+      for sym in syms(self._elf, scn._obj.contents):
         yield ElfSym(self._elf, scn, pointer(sym[1]))
 
   def findSym(self, name):
-    for s in self.syms():
-      if s.name == name:
-        return s
-    return None
+    try:
+      return self._symsMap[name]
+    except:
+      return None
 
 class Ar:
   def __init__(self, fname, claz):
