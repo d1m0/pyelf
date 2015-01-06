@@ -10,6 +10,10 @@ import pylibelf
 import types
 import os
 
+def _inrange(x, a,b):
+  return x>=a and x < b
+
+
 class BaseElfNode(object):
   _globCache = {}
 
@@ -95,14 +99,18 @@ class ElfSym(BaseElfNode):
     elif (name == "defined"):
       return self.st_shndx != SHN_UNDEF
     elif (name == "contents"):
-      (c, lelfRels, lelfRelas) = derefSymbolFull(self._elf, self._obj.contents)
       targetSec = self._pt._pt.section(self.st_shndx)
-      relaSec = targetSec.relaScn
-      rels = [ ElfRel(self._elf, relaSec, pointer(r))
-          for (r, scnInd) in lelfRels ]
-      relas = [ ElfRela(self._elf, relaSec, pointer(r))
-          for (r, scnInd) in lelfRelas ]
-      return (c, rels, relas)
+      relas = []
+
+      for relaScn in targetSec.relaScns:
+        relas.extend(filter(lambda r:
+        _inrange(r.r_offset, self.st_value, self.st_value + self.st_size),
+        relaScn.relas))
+
+      #TODO: rels = []
+      rels = []
+      mem = derefSymbol(self._elf, self._obj.contents)
+      return (mem, rels, relas)
     else:
       return BaseElfNode._getattr_impl(self, name)
 
@@ -170,11 +178,9 @@ class ElfScn(BaseElfNode):
       return reduce(lambda a,c: a+c, \
         map(lambda d: map(lambda rela:  ElfRela(self._elf, self, pointer(rela)),\
           list(arr_iter(d, relaT))), list(data(self._obj))))
-    elif (name == "relaScn"):
-      for s in self._pt.sections():
-        if s.shdr.sh_info == self.index:
-          return s
-
+    elif (name == "relaScns"):
+      return [s for s in self._pt.sections if s.shdr.sh_info == self.index\
+        and s.shdr.sh_type == SHT_RELA]
       return None
     else:
       return BaseElfNode._getattr_impl(self, name)
@@ -214,6 +220,10 @@ class Elf(BaseElfNode):
     self._symsMap = dict([
       (sym.name, sym) for sym in self.syms()
     ])
+
+    self._secMap = dict([
+      (elf_ndxscn(s._obj), s) for s in self.sections
+    ])
   
 #  def __del__(self):
 #    fd = self.fd
@@ -228,18 +238,17 @@ class Elf(BaseElfNode):
       return self.ehdr.e_shstrndx
     elif (name == "arhdr"):
       return ElfArhdr(self._elf, self, elf_getarhdr(self._elf))
+    elif (name == "sections"):
+      return [ ElfScn(self._elf, self, pointer(s)) for s in 
+        sections(self._elf) ]
     else:
       return BaseElfNode._getattr_impl(self, name)
 
-  def sections(self, **kwargs):
-    for s in sections(self._elf, **kwargs):
-      yield ElfScn(self._elf, self, pointer(s))
-
   def section(self, ind):
-    return ElfScn(self._elf, self, elf_getscn(self._elf, ind))
+    return self._secMap[ind]
 
   def syms(self):
-    for scn in self.sections():
+    for scn in self.sections:
       if scn.shdr.sh_type != SHT_SYMTAB:
         continue
 
