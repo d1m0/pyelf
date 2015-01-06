@@ -24,8 +24,12 @@ class BaseElfNode(object):
     self._pt = pt
     self._obj = obj
     self._ptr = cast(self._obj, c_void_p).value
+    self._elf_ptr = cast(self._elf, c_void_p).value
     self._typ = typ
     self._cache = {}
+
+    if self._elf_ptr not in self._globCache:
+      self._globCache[self._elf_ptr] = {}
 
     self._fields = []
     if self._typ != None:
@@ -35,17 +39,18 @@ class BaseElfNode(object):
   def _select(self, name):  return select(self._elf, name)
 
   def __getattr__(self, name):
+    cache = self._globCache[self._elf_ptr]
     key = (self._ptr, name)
 
-    if (key in self._globCache):
-      return self._globCache[key]
+    if (key in cache):
+      return cache[key]
 
     res = self._getattr_impl(name)
 
     if (isinstance(res, types.GeneratorType)):
-      self._globCache[key] = list(res)
+      cache[key] = list(res)
     else:
-      self._globCache[key] = res
+      cache[key] = res
     return res
 
   def _getattr_impl(self, name):
@@ -237,11 +242,15 @@ class Elf(BaseElfNode):
       (elf_ndxscn(s._obj), s) for s in self.sections
     ])
   
-#  def __del__(self):
-#    fd = self.fd
-#    elf_end(self._elf)
-#    if fd != None:
-#      os.close(fd)
+  def __del__(self):
+    fd = self.fd
+    elf = self._elf
+    elf_ptr = self._elf_ptr
+    # Past this point can't access atributes on ourselves
+    del self._globCache[elf_ptr]
+    elf_end(elf)
+    if fd != None:
+      os.close(fd)
 
   def _getattr_impl(self, name):
     if (name == "ehdr"):
