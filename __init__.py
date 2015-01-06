@@ -5,6 +5,7 @@ from pylibelf.constants import *
 from pylibelf.util import *
 from pylibelf.util.syms import *
 from pylibelf.macros import *
+from bisect import bisect_left
 import pylibelf.util
 import pylibelf
 import types
@@ -103,9 +104,15 @@ class ElfSym(BaseElfNode):
       relas = []
 
       for relaScn in targetSec.relaScns:
-        relas.extend(filter(lambda r:
-        _inrange(r.r_offset, self.st_value, self.st_value + self.st_size),
-        relaScn.relas))
+        # [self.st_value ...
+        start = bisect_left(relaScn.relas, self.st_value) 
+        #  ... self.st_value + self.st_size)
+        end = bisect_left(relaScn.relas, self.st_value + self.st_size)
+        relas.extend(relaScn.relas[start:end])
+
+      # Testing only
+      #for r in relas:
+      #  assert(r.r_offset >= self.st_value and r.r_offset < self.st_value + self.st_size)
 
       #TODO: rels = []
       rels = []
@@ -128,6 +135,11 @@ class ElfRela(BaseElfNode):
       return ElfSym(self._elf, scn, scn.sym(symInd)._obj)
     else:
       return BaseElfNode._getattr_impl(self, name)
+
+  def __cmp__(self, other):
+    if type(other) == long or type(other) == int:
+      return self.r_offset.__cmp__(other)
+    raise Exception("NYI")
 
 class ElfRel(BaseElfNode):
   def __init__(self, elf, pt, obj):
