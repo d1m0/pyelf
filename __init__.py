@@ -16,20 +16,20 @@ def _inrange(x, a,b):
 
 
 class BaseElfNode(object):
-  _globCache = {}
-
   def __init__(self, elf, pt, obj, typ = None, addFields = []):
     assert(pt == None or isinstance(pt, BaseElfNode))
     self._elf = elf
     self._pt = pt
     self._obj = obj
     self._ptr = cast(self._obj, c_void_p).value
-    self._elf_ptr = cast(self._elf, c_void_p).value
     self._typ = typ
-    self._cache = {}
 
-    if self._elf_ptr not in self._globCache:
-      self._globCache[self._elf_ptr] = {}
+    # All object's memoization cache points to the root elf file's memoization cache
+    if (isinstance(self, Elf)):
+      self._cache = {}
+    else:
+      while (not isinstance(pt, Elf)):  pt = pt._pt
+      self._cache = pt._cache
 
     self._fields = []
     if self._typ != None:
@@ -39,7 +39,7 @@ class BaseElfNode(object):
   def _select(self, name):  return select(self._elf, name)
 
   def __getattr__(self, name):
-    cache = self._globCache[self._elf_ptr]
+    cache = self._cache
     key = (self._ptr, name)
 
     if (key in cache):
@@ -242,15 +242,10 @@ class Elf(BaseElfNode):
       (elf_ndxscn(s._obj), s) for s in self.sections
     ])
   
-  def __del__(self):
-    fd = self.fd
-    elf = self._elf
-    elf_ptr = self._elf_ptr
-    # Past this point can't access atributes on ourselves
-    del self._globCache[elf_ptr]
-    elf_end(elf)
-    if fd != None:
-      os.close(fd)
+  def finalize(self):
+    elf_end(self._elf)
+    if self.fd != None:
+      os.close(self.fd)
 
   def _getattr_impl(self, name):
     if (name == "ehdr"):
@@ -293,7 +288,7 @@ class Ar:
     while True:
       e = elf_begin(self.fd, ELF_C_READ, ar)
       if (not bool(e)): break
-      yield Elf(e, None, self._class)
+      yield Elf(e, None, self._class) 
 
     elf_end(ar)
     os.close(self.fd)
