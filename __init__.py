@@ -28,6 +28,7 @@ class BaseElfNode(object):
     self._typ = typ
     self._cache = {}
 
+
     if self._elf_ptr not in self._globCache:
       self._globCache[self._elf_ptr] = {}
 
@@ -59,7 +60,7 @@ class BaseElfNode(object):
     except AttributeError:
       raise Exception("Can't access %s in %s - not a pointer" % \
         (name, str(self._obj)))
-      
+
     return getattr(inner, name)
 
   def _getelf(self):
@@ -74,6 +75,13 @@ class BaseElfNode(object):
 
   def __dir__(self):
     return self._fields
+
+  def to_dict(self):
+    """ Convert the object into a dictionary.
+        Used to remedy the "not enough memory" problem
+    """
+    return dict([(name, getattr(name)) for name in self._fields])
+
 
 class ElfEhdr(BaseElfNode):
   def __init__(self, elf, pt, obj):
@@ -110,7 +118,7 @@ class ElfSym(BaseElfNode):
 
       for relaScn in targetSec.relaScns:
         # [self.st_value ...
-        start = bisect_left(relaScn.relas, self.st_value) 
+        start = bisect_left(relaScn.relas, self.st_value)
         #  ... self.st_value + self.st_size)
         end = bisect_left(relaScn.relas, self.st_value + self.st_size)
         relas.extend(relaScn.relas[start:end])
@@ -203,7 +211,7 @@ class ElfScn(BaseElfNode):
       return BaseElfNode._getattr_impl(self, name)
 
   def sym(self, ind):
-    shtype = self.shdr.sh_type 
+    shtype = self.shdr.sh_type
     if shtype not in [SHT_SYMTAB, SHT_DYNSYM]:
       raise Exception("Section %s does not contain symbols" % (self.shdr.name,))
 
@@ -217,7 +225,7 @@ class ElfScn(BaseElfNode):
       yield ElfData(self._elf, self, d)
 
 class Elf(BaseElfNode):
-  def __init__(self, elf, pt=None, claz = None):
+  def __init__(self, elf, pt=None, claz = None, fp=None):
     if type(elf) == str:
       self.fd = os.open(elf, os.O_RDONLY)
       elf = elf_begin(self.fd, ELF_C_READ, None)
@@ -238,10 +246,14 @@ class Elf(BaseElfNode):
       (sym.name, sym) for sym in self.syms()
     ])
 
+    if fp != None:
+      fp.write("[ELF] __init__ > _globCache: %s\n" % (BaseElfNode._globCache[self._elf_ptr]))
+      fp.flush()
+
     self._secMap = dict([
       (elf_ndxscn(s._obj), s) for s in self.sections
     ])
-  
+
   def __del__(self):
     fd = self.fd
     elf = self._elf
@@ -260,7 +272,7 @@ class Elf(BaseElfNode):
     elif (name == "arhdr"):
       return ElfArhdr(self._elf, self, elf_getarhdr(self._elf))
     elif (name == "sections"):
-      return [ ElfScn(self._elf, self, pointer(s)) for s in 
+      return [ ElfScn(self._elf, self, pointer(s)) for s in
         sections(self._elf) ]
     else:
       return BaseElfNode._getattr_impl(self, name)
@@ -293,7 +305,8 @@ class Ar:
     while True:
       e = elf_begin(self.fd, ELF_C_READ, ar)
       if (not bool(e)): break
-      yield Elf(e, None, self._class)
+      r =  Elf(e, None, self._class)
+      yield r
 
     elf_end(ar)
     os.close(self.fd)
