@@ -39,7 +39,7 @@ class BaseElfNode(object):
       for attr in dir(obj):
         if (isinstance(obj, ElfSym) and attr == 'contents' and not obj.defined):
           v = None
-        elif (isinstance(obj, ElfScn) and (attr == 'info_scn' or attr == 'link_scn')):
+        elif (isinstance(obj, ElfScn) and (attr == 'info_scn' or attr == 'link_scn' or attr == 'index')):
           try:
             v = getattr(obj, attr)
           except ElfError: # This section doesn't have a info_scn or a link_scn
