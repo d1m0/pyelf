@@ -14,8 +14,60 @@ import os
 def _inrange(x, a,b):
   return x>=a and x < b
 
+class Bunch:
+  def __setitem__(self, k, v):  self.__dict__[k] = v
+  def __getitem__(self, k):  return self.__dict__[k]
 
 class BaseElfNode(object):
+  @staticmethod
+  def extract(obj):
+    return BaseElfNode._extract(obj, {})
+
+  @staticmethod
+  def _extract(obj, m):
+    """ Given a BaseElfNode object extract a static snapshot of the current
+        object and its children that does not refer to the parent or any pylibelf
+        objects
+    """
+    if isinstance(obj, BaseElfNode):
+      if obj in m:
+        return m[obj]
+
+      res = Bunch()
+      m[obj] = res
+
+      for attr in dir(obj):
+        if (isinstance(obj, ElfSym) and attr == 'contents' and not obj.defined):
+          v = None
+        elif (isinstance(obj, ElfScn) and (attr == 'info_scn' or attr == 'link_scn')):
+          try:
+            v = getattr(obj, attr)
+          except ElfError: # This section doesn't have a info_scn or a link_scn
+            v = None
+        else:
+          v = getattr(obj, attr)
+
+        if hasattr(v, "__call__"):
+          # This is a function - ignore
+          continue
+
+        try:
+            res[attr] = BaseElfNode._extract(v, m)
+        except AttributeError:  pass
+
+      return res
+    elif type(obj) == list:
+      return map(lambda x:  BaseElfNode._extract(x, m), obj)
+    elif type(obj) == tuple:
+      return tuple(map(lambda x:  BaseElfNode._extract(x, m), obj))
+    elif type(obj) == dict:
+      return dict([(BaseElfNode.extract(k, m), BaseElfNode.extract(v, m)) for (k,v) in obj.items()])
+    elif type(obj) in [int, str, long, bool, types.NoneType]:
+      return obj
+    else:
+      print type(obj), obj
+      return None
+
   def __init__(self, elf, pt, obj, typ = None, addFields = []):
     assert(pt == None or isinstance(pt, BaseElfNode))
     self._elf = elf
@@ -55,7 +107,10 @@ class BaseElfNode(object):
 
   def _getattr_impl(self, name):
     try:
-      inner = self._obj.contents
+      if (self._obj != None):
+        inner = self._obj.contents
+      else:
+        return 0
     except AttributeError:
       raise Exception("Can't access %s in %s - not a pointer" % \
         (name, str(self._obj)))
@@ -241,6 +296,10 @@ class Elf(BaseElfNode):
     self._secMap = dict([
       (elf_ndxscn(s._obj), s) for s in self.sections
     ])
+
+
+    nullScn = ElfScn(self._elf, self, None)
+    self._secMap[0] = nullScn
   
   def finalize(self):
     elf_end(self._elf)
