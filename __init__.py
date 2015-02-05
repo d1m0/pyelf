@@ -14,6 +14,9 @@ import os
 def _inrange(x, a,b):
   return x>=a and x < b
 
+def _overlap(a, b, c, d):
+  return a <= d and c <= b
+
 class Bunch:
   def __setitem__(self, k, v):  self.__dict__[k] = v
   def __getitem__(self, k):  return self.__dict__[k]
@@ -171,22 +174,11 @@ class ElfSym(BaseElfNode):
         return ELF32_ST_BIND(self.st_info)
     elif (name == "contents"):
       targetSec = self._pt._pt.section(self.st_shndx)
-      relas = []
+      relas = targetSec.relasInRange(self.st_value, self.st_size)
 
-      for relaScn in targetSec.relaScns:
-        # [self.st_value ...
-        start = bisect_left(relaScn.relas, self.st_value) 
-        #  ... self.st_value + self.st_size)
-        end = bisect_left(relaScn.relas, self.st_value + self.st_size)
-        relas.extend(relaScn.relas[start:end])
-
-      # Testing only
-      #for r in relas:
-      #  assert(r.r_offset >= self.st_value and r.r_offset < self.st_value + self.st_size)
-
-      #TODO: rels = []
+      #TODO: rels 
       rels = []
-      mem = derefSymbol(self._elf, self._obj.contents)
+      mem = targetSec.memInRange(self.st_value, self.st_size)
       return (mem, rels, relas)
     else:
       return BaseElfNode._getattr_impl(self, name)
@@ -237,7 +229,8 @@ class ElfArhdr(BaseElfNode):
 class ElfScn(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj, Elf_Scn,\
-      ['index', 'shdr', 'link_scn', 'info_scn', 'syms', 'relas', 'sym', 'data'])
+      ['index', 'shdr', 'link_scn', 'info_scn', 'syms', 'relas', 'relaScns', 'sym', 'data', 'memInRange',
+        'relasInRange', 'strAtAddr'])
 
   def _getattr_impl(self, name):
     if (name == "index"):
@@ -280,6 +273,55 @@ class ElfScn(BaseElfNode):
       d = elf_getdata(self._obj, d)
       if not bool(d): break
       yield ElfData(self._elf, self, d)
+
+  def memInRange(self, start, size):
+    r = ''
+    off = 0
+    base = self.shdr.sh_addr
+    end = start + size
+
+    for d in self.data():
+      if start >= end:  break;
+      off = base + d.d_off
+      if start >= off and start < off + d.d_size:
+        c = cast(d.d_buf, POINTER(c_char))
+        l = min(off + d.d_size, end) - start
+        r += c[start- off : start - off + l]
+        start += l
+
+    return r
+
+  def relasInRange(self, start, size):
+    relas = []
+
+    for relaScn in self.relaScns:
+      # [self.st_value ...
+      start = bisect_left(relaScn.relas, start) 
+      #  ... self.st_value + self.st_size)
+      end = bisect_left(relaScn.relas, start + size)
+      relas.extend(relaScn.relas[start:end])
+
+    return relas
+
+  def strAtAddr(self, ptr):
+    r = ''
+    off = 0
+    base = self.shdr.sh_addr
+    start = ptr - base
+
+    for d in self.data():
+      off = d.d_off
+      c = cast(d.d_buf, POINTER(c_char))
+
+      while (start >= off and start < off + d.d_size):
+
+        if c[start] == '\x00':
+          break
+
+        r += c[start]
+        start += 1
+
+    return r
 
 class Elf(BaseElfNode):
   def __init__(self, elf, pt=None, claz = None):
@@ -345,6 +387,20 @@ class Elf(BaseElfNode):
       return self._symsMap[name]
     except:
       return None
+
+  def deref(self, addr, size):
+    r = None
+    for s in self.sections:
+      # TODO(dbounov): Hack, due to .tbss overlapping other sections. Figure out correct way to deal with this.
+      if s.shdr.name == ".tbss":
+        continue
+
+      if _overlap(addr, addr+size - 1, s.shdr.sh_addr, s.shdr.sh_addr + s.shdr.sh_size - 1):
+        print "FOUND IN ", s.shdr.name
+        assert r == None # Currently support address ranges in a single section only
+        r = (s.memInRange(addr, size), [], s.relasInRange(addr, size) )
+
+    return r
 
 class Ar:
   def __init__(self, fname, claz):
