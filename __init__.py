@@ -114,7 +114,7 @@ class BaseElfNode(object):
     except AttributeError:
       raise Exception("Can't access %s in %s - not a pointer" % \
         (name, str(self._obj)))
-      
+
     return getattr(inner, name)
 
   def _getelf(self):
@@ -175,7 +175,7 @@ class ElfSym(BaseElfNode):
 
       for relaScn in targetSec.relaScns:
         # [self.st_value ...
-        start = bisect_left(relaScn.relas, self.st_value) 
+        start = bisect_left(relaScn.relas, self.st_value)
         #  ... self.st_value + self.st_size)
         end = bisect_left(relaScn.relas, self.st_value + self.st_size)
         relas.extend(relaScn.relas[start:end])
@@ -263,12 +263,13 @@ class ElfScn(BaseElfNode):
     elif (name == "relaScns"):
       return [s for s in self._pt.sections if s.shdr.sh_info == self.index\
         and s.shdr.sh_type == SHT_RELA]
-      return None
+    elif (name == "name"):
+      return self.shdr.name
     else:
       return BaseElfNode._getattr_impl(self, name)
 
   def sym(self, ind):
-    shtype = self.shdr.sh_type 
+    shtype = self.shdr.sh_type
     if shtype not in [SHT_SYMTAB, SHT_DYNSYM]:
       raise Exception("Section %s does not contain symbols" % (self.shdr.name,))
 
@@ -310,7 +311,7 @@ class Elf(BaseElfNode):
 
     nullScn = ElfScn(self._elf, self, None)
     self._secMap[0] = nullScn
-  
+
   def finalize(self):
     elf_end(self._elf)
     if self.fd != None:
@@ -324,8 +325,11 @@ class Elf(BaseElfNode):
     elif (name == "arhdr"):
       return ElfArhdr(self._elf, self, elf_getarhdr(self._elf))
     elif (name == "sections"):
-      return [ ElfScn(self._elf, self, pointer(s)) for s in 
+      return [ ElfScn(self._elf, self, pointer(s)) for s in
         sections(self._elf) ]
+    elif (name == "relasMap"):
+      return dict([(s.index, s.relas) \
+                  for s in self.sections if s.shdr.sh_type == SHT_RELA])
     else:
       return BaseElfNode._getattr_impl(self, name)
 
@@ -357,7 +361,7 @@ class Ar:
     while True:
       e = elf_begin(self.fd, ELF_C_READ, ar)
       if (not bool(e)): break
-      yield Elf(e, None, self._class) 
+      yield Elf(e, None, self._class)
 
     elf_end(ar)
     os.close(self.fd)
