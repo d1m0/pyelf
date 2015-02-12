@@ -237,10 +237,11 @@ class ElfScn(BaseElfNode):
       return elf_ndxscn(self._obj)
     elif (name == "shdr"):
       return ElfShdr(self._elf, self, select(self._elf, 'getshdr')(self._obj))
-    elif (name == "link_scn"):
+    elif (name == "link_scn" and self.shdr.sh_link != SHN_UNDEF):
       return ElfScn(self._elf, self._pt, elf_getscn(self._elf, \
         self.shdr.sh_link))
-    elif (name == "info_scn"):
+    elif (name == "info_scn" and (self.shdr.sh_type == SHT_REL or \
+      self.shdr.sh_type == SHT_RELA)):
       return ElfScn(self._elf, self._pt, elf_getscn(self._elf, \
         self.shdr.sh_info))
     elif (name == "syms" and self.shdr.sh_type in [SHT_SYMTAB, SHT_DYNSYM]):
@@ -256,7 +257,6 @@ class ElfScn(BaseElfNode):
     elif (name == "relaScns"):
       return [s for s in self._pt.sections if s.shdr.sh_info == self.index\
         and s.shdr.sh_type == SHT_RELA]
-      return None
     else:
       return BaseElfNode._getattr_impl(self, name)
 
@@ -364,7 +364,11 @@ class Elf(BaseElfNode):
     elif (name == "shstrndx"):
       return self.ehdr.e_shstrndx
     elif (name == "arhdr"):
-      return ElfArhdr(self._elf, self, elf_getarhdr(self._elf))
+      arhdr = elf_getarhdr(self._elf)
+      if (bool(arhdr)):
+        return ElfArhdr(self._elf, self, arhdr)
+      else:
+        raise AttributeError("Elf file doesn't have an arhdr")
     elif (name == "sections"):
       return [ ElfScn(self._elf, self, pointer(s)) for s in 
         sections(self._elf) ]
@@ -396,7 +400,6 @@ class Elf(BaseElfNode):
         continue
 
       if _overlap(addr, addr+size - 1, s.shdr.sh_addr, s.shdr.sh_addr + s.shdr.sh_size - 1):
-        print "FOUND IN ", s.shdr.name
         assert r == None # Currently support address ranges in a single section only
         r = (s.memInRange(addr, size), [], s.relasInRange(addr, size) )
 
