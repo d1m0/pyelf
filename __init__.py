@@ -153,7 +153,7 @@ class ElfSym(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj,
       Elf64_Sym if is64(elf) else Elf32_Sym, ['name', 'section', 'defined', \
-        'contents', 'type', 'binding'])
+        'contents', 'type', 'binding', 'index'])
 
   def _getattr_impl(self, name):
     if (name == "name"):
@@ -191,6 +191,20 @@ class ElfSym(BaseElfNode):
       rels = []
       mem = targetSec.memInRange(self.st_value, self.st_size)
       return (mem, rels, relas)
+    elif (name == "index"):
+      size = sizeof(self._typ)
+      ptr = cast(self._obj, c_voidp).value
+      ind = None
+
+      for d in self.section.data():
+        if d.d_buf <= ptr and d.d_buf + d.d_size > ptr:
+          assert (ptr - d.d_buf) % size == 0, "Misaligned symbol pointer %d in section %s" % \
+            (ptr, self.section.shdr.name)
+
+          ind = (ptr - d.d_buf) / size
+
+      assert ind != None, "Symbol not found in section!"
+      return ind
     else:
       return BaseElfNode._getattr_impl(self, name)
 
