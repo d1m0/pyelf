@@ -153,7 +153,7 @@ class ElfSym(BaseElfNode):
   def __init__(self, elf, pt, obj):
     BaseElfNode.__init__(self, elf, pt, obj,
       Elf64_Sym if is64(elf) else Elf32_Sym, ['name', 'section', 'defined', \
-        'contents', 'type', 'binding'])
+        'contents', 'type', 'binding', 'targetScn'])
 
   def _getattr_impl(self, name):
     if (name == "name"):
@@ -172,6 +172,8 @@ class ElfSym(BaseElfNode):
         return ELF64_ST_BIND(self.st_info)
       else:
         return ELF32_ST_BIND(self.st_info)
+    elif (name == "targetScn"):
+      return self._pt._pt.section(self.st_shndx)
     elif (name == "contents"):
       targetSec = self._pt._pt.section(self.st_shndx)
       relas = []
@@ -396,7 +398,7 @@ class Elf(BaseElfNode):
 
   def syms(self):
     for scn in self.sections:
-      if scn.shdr.sh_type != SHT_SYMTAB:
+      if scn.shdr.sh_type != SHT_SYMTAB and scn.shdr.sh_type != SHT_DYNSYM:
         continue
 
       for sym in syms(self._elf, scn._obj.contents):
