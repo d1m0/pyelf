@@ -227,7 +227,12 @@ class ElfRela(BaseElfNode):
 
   def __cmp__(self, other):
     if type(other) == long or type(other) == int:
-      return self.r_offset.__cmp__(other)
+      if self.r_offset < other:
+        return -1
+      elif self.r_offset == other:
+        return 0
+      else:
+        return 1
     raise Exception("NYI")
 
 class ElfRel(BaseElfNode):
